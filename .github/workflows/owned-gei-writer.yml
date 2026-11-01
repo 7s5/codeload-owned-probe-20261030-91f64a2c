@@ -1,0 +1,60 @@
+name: Two Artifact Pivot Consumer
+
+on:
+  workflow_run:
+    workflows: ["Two Artifact Pivot Producer"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  consume:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and extract artifacts using the affected pattern
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cd artifacts
+
+          mapfile -t names < <(gh api "$ARTIFACTS_URL" -q '.artifacts[].name')
+          if [[ "${names[0]:-}" != "." || "${names[1]:-}" != "pivot" || "${names[2]:-}" != "A" ]]; then
+            echo "Refusing to extract because the benign pivot order was not observed" >&2
+            exit 1
+          fi
+
+          gh api "$ARTIFACTS_URL" -q '.artifacts[] | [.name, .archive_download_url] | @tsv' |
+            while IFS=$'\t' read -r name url; do
+              gh api "$url" > "$name.zip"
+              unzip -q -d "$name" "$name.zip"
+            done
+
+      - name: Execute the prepared action after the overwrite
+        id: proof
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          BENIGN_TRUSTED_MARKER: GH_GE_I_ACTION_OVERWRITE_7F4C
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            core.setFailed('The original action ran, so the benign overwrite did not occur.');
+
+      - name: Assert benign trusted-job execution
+        shell: bash
+        env:
+          OWNED: ${{ steps.proof.outputs.owned }}
+          TOKEN_PRESENT: ${{ steps.proof.outputs.token_present }}
+        run: |
+          set -euo pipefail
+          test "$OWNED" = true
+          test "$TOKEN_PRESENT" = true
+          echo "PASS: attacker-authored code executed in the trusted workflow_run job; no credential bytes were displayed or transmitted"
