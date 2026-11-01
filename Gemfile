@@ -5,3 +5,4 @@ gem "owned_dependabot_remote_probe",
     branch: "main"
 # Owned Dependabot JIT probe trigger 2026-11-01
 # Owned nested workflow scope composition probe 2026-11-01
+# Owned nested workflow X-Forwarded-For control 2026-11-01
