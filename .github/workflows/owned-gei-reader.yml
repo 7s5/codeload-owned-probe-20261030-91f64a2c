@@ -106,7 +106,7 @@ jobs:
                 workflowJobRunBackendId,
                 name,
                 version: 7,
-                mimeType: 'application/zip',
+              mimeType: {value: 'application/zip'},
               });
               if (!create.ok || !create.signedUploadUrl) {
                 throw new Error(`CreateArtifact returned no upload URL for ${JSON.stringify(name)}`);
@@ -130,7 +130,7 @@ jobs:
                 workflowJobRunBackendId,
                 name,
                 size: String(bytes.length),
-                hash: `sha256:${hash}`,
+              hash: {value: `sha256:${hash}`},
               });
               if (!finalize.ok) throw new Error(`FinalizeArtifact failed for ${JSON.stringify(name)}`);
             }
