@@ -1,0 +1,50 @@
+name: Official Downloader Dot Consumer
+
+on:
+  workflow_run:
+    workflows: ["Official Downloader Dot Producer"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  consume:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare trusted workspace target
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > trusted-target.js <<'ORIGINAL'
+          throw new Error('The original trusted workspace target ran; overwrite did not occur.');
+          ORIGINAL
+
+      - name: Download all artifacts with the official action
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Execute trusted workspace target
+        id: proof
+        shell: bash
+        env:
+          BENIGN_TRUSTED_MARKER: OFFICIAL_DOWNLOADER_DOT_3C91
+          OWNED_TRUSTED_TOKEN: ${{ github.token }}
+        run: node trusted-target.js
+
+      - name: Assert benign trusted-job execution
+        shell: bash
+        env:
+          OWNED: ${{ steps.proof.outputs.owned }}
+          TOKEN_PRESENT: ${{ steps.proof.outputs.token_present }}
+        run: |
+          set -euo pipefail
+          test "$OWNED" = true
+          test "$TOKEN_PRESENT" = true
+          echo "PASS: official actions/download-artifact placed the dot artifact in the trusted workspace; no credential bytes were displayed or transmitted"
