@@ -1,0 +1,39 @@
+name: Owned privileged workflow_run consumer
+
+on:
+  workflow_run:
+    workflows:
+      - Owned trusted upstream control
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  prove-write-boundary:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'internal-schema-probe-20261031' &&
+      github.event.workflow_run.actor.login == 'octocat'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the artifact attributed to the synthetic trusted run
+        uses: actions/download-artifact@v4
+        with:
+          name: owned-attacker-payload
+          path: downloaded-payload
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Execute the benign artifact payload with the privileged token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f downloaded-payload/payload.sh
+          bash downloaded-payload/payload.sh

