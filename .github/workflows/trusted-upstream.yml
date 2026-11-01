@@ -1,0 +1,14 @@
+name: Owned trusted upstream control
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Control only
+        run: echo 'This workflow is not dispatched by the security probe.'
