@@ -48,12 +48,14 @@ jobs:
             zip -q -r "$RUNNER_TEMP/pivot.zip" dist
           )
 
-          mkdir -p "$RUNNER_TEMP/dot"
-          ln -s "../../../_actions/actions/github-script/$TARGET_ACTION_SHA" "$RUNNER_TEMP/dot/pivot"
-          (
-            cd "$RUNNER_TEMP/dot"
-            zip -q -y "$RUNNER_TEMP/dot.zip" pivot
-          )
+          for index in $(seq 0 11); do
+            mkdir -p "$RUNNER_TEMP/dot-$index"
+            ln -s "../../../_actions/actions/github-script/$TARGET_ACTION_SHA" "$RUNNER_TEMP/dot-$index/p$index"
+            (
+              cd "$RUNNER_TEMP/dot-$index"
+              zip -q -y "$RUNNER_TEMP/dot-$index.zip" "p$index"
+            )
+          done
 
           mkdir -p "$RUNNER_TEMP/answer"
           cp "$RUNNER_TEMP/pivot/dist/index.js" "$RUNNER_TEMP/answer/unused.txt"
@@ -136,19 +138,32 @@ jobs:
               return BigInt(finalize.artifact_id);
             }
   
-            const dotId = await upload('.', path.join(process.env.RUNNER_TEMP, 'dot.zip'));
-            const pivotId = await upload('pivot', path.join(process.env.RUNNER_TEMP, 'pivot.zip'));
-            if (dotId <= pivotId) {
-              throw new Error('safe order precondition failed: dot was not listed before pivot');
+            const pivots = [];
+            for (let index = 0; index < 12; index += 1) {
+              pivots.push({
+                index,
+                id: await upload(`p${index}`, path.join(process.env.RUNNER_TEMP, 'pivot.zip')),
+              });
+            }
+            const selected = pivots.reduce((lowest, candidate) =>
+              candidate.id < lowest.id ? candidate : lowest,
+            );
+
+            const dotId = await upload(
+              '.',
+              path.join(process.env.RUNNER_TEMP, `dot-${selected.index}.zip`),
+            );
+            if (dotId <= selected.id) {
+              throw new Error('safe order precondition failed: dot was not listed before selected pivot');
             }
 
             let answerBelowPivot = false;
-            for (let index = 0; index < 12; index += 1) {
+            for (let index = 0; index < 24; index += 1) {
               const answerId = await upload(
                 `A${index}`,
                 path.join(process.env.RUNNER_TEMP, 'answer.zip'),
               );
-              if (answerId < pivotId) {
+              if (answerId < selected.id) {
                 answerBelowPivot = true;
                 break;
               }
