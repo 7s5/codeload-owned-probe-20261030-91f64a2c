@@ -4,7 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-    open-pull-requests-limit: 12
+    open-pull-requests-limit: 13
 # Owned JIT route probe 2026-11-01
 # Owned nested workflow scope composition probe 2026-11-01
 # Owned X-Forwarded-For scope control 2026-11-01
@@ -20,3 +20,4 @@ updates:
 # Owned second grouped bootstrap trigger 2026-11-01
 # Owned existing-PR base inheritance trigger 2026-11-01
 # Owned third grouped bootstrap trigger 2026-11-01
+# Owned race-free existing-PR refresh trigger 2026-11-01
