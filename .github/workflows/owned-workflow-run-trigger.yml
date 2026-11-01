@@ -86,12 +86,13 @@ jobs:
           artifact_query='query($id:ID!){node(id:$id){... on CheckSuite{artifacts(first:100){nodes{name size sourceUrl}}}}}'
           artifact_source_url=''
           artifact_size=''
-          for _ in $(seq 1 20); do
+          artifact_response='{}'
+          for _ in $(seq 1 5); do
             artifact_response="$(curl --fail-with-body --silent --show-error \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Content-Type: application/json' \
               -H 'GraphQL-Schema: internal' \
-              -H 'Forwarded: for=127.0.0.1' \
+              -H 'X-Forwarded-For: 127.0.0.1' \
               https://api.github.com/graphql \
               --data "$(jq -nc --arg query "$artifact_query" --arg id "$current_suite_id" '{query:$query,variables:{id:$id}}')")"
             artifact_source_url="$(jq -r '.data.node.artifacts.nodes[]? | select(.name == "owned-attacker-payload") | .sourceUrl' <<<"$artifact_response" | head -n1)"
@@ -101,6 +102,9 @@ jobs:
             fi
             sleep 2
           done
+          if [[ -z "$artifact_source_url" || "$artifact_source_url" == null ]]; then
+            jq '{topLevelErrors:.errors,nodePresent:(.data.node != null),artifactsFieldPresent:(.data.node.artifacts != null)}' <<<"$artifact_response"
+          fi
           test -n "$artifact_source_url"
           test "$artifact_source_url" != null
           test -n "$artifact_size"
@@ -119,7 +123,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Content-Type: application/json' \
             -H 'GraphQL-Schema: internal' \
-            -H 'Forwarded: for=127.0.0.1' \
+            -H 'X-Forwarded-For: 127.0.0.1' \
             https://api.github.com/graphql \
             --data "$create_payload")"
 
@@ -147,7 +151,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Content-Type: application/json' \
             -H 'GraphQL-Schema: internal' \
-            -H 'Forwarded: for=127.0.0.1' \
+            -H 'X-Forwarded-For: 127.0.0.1' \
             https://api.github.com/graphql \
             --data "$update_payload")"
 
