@@ -1,14 +1,14 @@
-name: Owned trusted upstream control
+name: Owned forged PR check control
 
 on:
-  workflow_dispatch:
+  pull_request:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  control:
+  owned-forged-pr-check:
+    name: owned-required-check-control
     runs-on: ubuntu-latest
     steps:
-      - name: Control only
-        run: echo 'This workflow is not dispatched by the security probe.'
+      - name: Inert assertion only
+        run: echo 'OWNED_DEPENDABOT_PR_WORKFLOW_PARENT_CONTROL'
