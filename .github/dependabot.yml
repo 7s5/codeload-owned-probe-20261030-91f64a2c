@@ -4,8 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 6
 # Owned JIT route probe 2026-11-01
 # Owned nested workflow scope composition probe 2026-11-01
 # Owned X-Forwarded-For scope control 2026-11-01
 # Owned Dependabot internal-schema egress control 2026-11-01
+# Owned Dependabot internal-schema GET control 2026-11-01
