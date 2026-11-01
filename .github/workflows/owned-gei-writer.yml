@@ -27,7 +27,18 @@ jobs:
           cd artifacts
 
           mapfile -t names < <(gh api "$ARTIFACTS_URL" -q '.artifacts[].name')
-          if [[ "${names[0]:-}" != "." || "${names[1]:-}" != "pivot" || "${names[2]:-}" != "A" ]]; then
+          dot_index=-1
+          pivot_index=-1
+          for index in "${!names[@]}"; do
+            case "${names[$index]}" in
+              .) dot_index="$index" ;;
+              pivot) pivot_index="$index" ;;
+              A*) ;;
+              *) echo "Unexpected artifact name in owned proof" >&2; exit 1 ;;
+            esac
+          done
+          if (( dot_index < 0 || pivot_index <= dot_index || pivot_index + 1 >= ${#names[@]} )) ||
+             [[ "${names[$((pivot_index + 1))]}" != A* ]]; then
             echo "Refusing to extract because the benign pivot order was not observed" >&2
             exit 1
           fi
