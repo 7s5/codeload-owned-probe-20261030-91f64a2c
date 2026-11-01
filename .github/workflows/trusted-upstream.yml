@@ -1,14 +1,14 @@
-name: Owned trusted upstream control
+name: Owned inherited auto-merge check
 
 on:
-  workflow_dispatch:
+  pull_request:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  control:
+  owned-inherited-check:
+    name: owned-required-check-automerge-control
     runs-on: ubuntu-latest
     steps:
-      - name: Control only
-        run: echo 'This workflow is not dispatched by the security probe.'
+      - name: Inert assertion only
+        run: echo 'OWNED_DEPENDABOT_UNATTENDED_MERGE_CHECK'
