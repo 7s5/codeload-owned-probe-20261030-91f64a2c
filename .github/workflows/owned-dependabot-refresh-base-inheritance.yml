@@ -1,0 +1,10 @@
+name: Owned Dependabot refresh base-inheritance proof
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inert-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Owned inert inherited workflow; not executed or merged."
