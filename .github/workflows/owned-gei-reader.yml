@@ -102,18 +102,18 @@ jobs:
   
             async function upload(name, archivePath) {
               const create = await rpc('CreateArtifact', {
-                workflowRunBackendId,
-                workflowJobRunBackendId,
+              workflow_run_backend_id: workflowRunBackendId,
+              workflow_job_run_backend_id: workflowJobRunBackendId,
                 name,
                 version: 7,
-              mimeType: {value: 'application/zip'},
+              mime_type: 'application/zip',
               });
-              if (!create.ok || !create.signedUploadUrl) {
+            if (!create.ok || !create.signed_upload_url) {
                 throw new Error(`CreateArtifact returned no upload URL for ${JSON.stringify(name)}`);
               }
   
               const bytes = fs.readFileSync(archivePath);
-              const response = await fetch(create.signedUploadUrl, {
+            const response = await fetch(create.signed_upload_url, {
                 method: 'PUT',
                 headers: {
                   'Content-Type': 'application/zip',
@@ -126,11 +126,11 @@ jobs:
   
               const hash = crypto.createHash('sha256').update(bytes).digest('hex');
               const finalize = await rpc('FinalizeArtifact', {
-                workflowRunBackendId,
-                workflowJobRunBackendId,
+              workflow_run_backend_id: workflowRunBackendId,
+              workflow_job_run_backend_id: workflowJobRunBackendId,
                 name,
                 size: String(bytes.length),
-              hash: {value: `sha256:${hash}`},
+              hash: `sha256:${hash}`,
               });
               if (!finalize.ok) throw new Error(`FinalizeArtifact failed for ${JSON.stringify(name)}`);
             }
