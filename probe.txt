@@ -1,0 +1,3 @@
+Archive-integrity control
+Commit: $Format:%H$
+Refs: $Format:%D$
